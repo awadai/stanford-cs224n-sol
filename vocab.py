@@ -6,16 +6,6 @@ CS224N 2018-19: Homework 5
 vocab.py: Vocabulary Generation
 Pencheng Yin <pcyin@cs.cmu.edu>
 Sahil Chopra <schopra8@stanford.edu>
-
-Usage:
-    vocab.py --train-src=<file> --train-tgt=<file> [options] VOCAB_FILE
-
-Options:
-    -h --help                  Show this screen.
-    --train-src=<file>         File of training source sentences
-    --train-tgt=<file>         File of training target sentences
-    --size=<int>               vocab size [default: 50000]
-    --freq-cutoff=<int>        frequency cutoff [default: 2]
 """
 
 from collections import Counter
@@ -30,7 +20,7 @@ class VocabEntry(object):
     """ Vocabulary Entry, i.e. structure containing either
     src or tgt language terms.
     """
-    def __init__(self, word2id=None):
+    def __init__(self, word2id=None, char_list=None):
         """ Init VocabEntry Instance.
         @param word2id (dict): dictionary mapping words 2 indices
         """
@@ -46,7 +36,12 @@ class VocabEntry(object):
         self.id2word = {v: k for k, v in self.word2id.items()}
 
         ## Additions to the A4 code:
-        self.char_list = list("""ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789,;.!?:'\"/\\|_@#$%^&*~`+-=<>()[]""")
+        if char_list:
+            #char_list provided for non-latin language
+            self.char_list = char_list
+        else:
+            #default latin char_list
+            self.char_list = list("""ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789,;.!?:'\"/\\|_@#$%^&*~`+-=<>()[]""")
 
         self.char2id = dict() # Converts characters to integers
         self.char2id['<pad>'] = 0
@@ -119,16 +114,12 @@ class VocabEntry(object):
         @param sents (list[list[str]]): sentence(s) in words
         @return word_ids (list[list[list[int]]]): sentence(s) in indices
         """
-        ### YOUR CODE HERE for part 1e
-        ### TODO:
         ###     This method should convert characters in the input sentences into their
         ###     corresponding character indices using the character vocabulary char2id
         ###     defined above.
-        ###
         ###     You must prepend each word with the `start_of_word` character and append
         ###     with the `end_of_word` character.
         return [[[self.start_of_word]+[self.char2id[c] for c in w]+[self.end_of_word] for w in s] for s in sents]
-        ### END YOUR CODE
 
     def words2indices(self, sents):
         """ Convert list of sentences of words into list of list of indices.
@@ -147,29 +138,21 @@ class VocabEntry(object):
     def to_input_tensor_char(self, sents: List[List[str]], device: torch.device) -> torch.Tensor:
         """ Convert list of sentences (words) into tensor with necessary padding for
         shorter sentences.
-
         @param sents (List[List[str]]): list of sentences (words)
         @param device: device on which to load the tensor, i.e. CPU or GPU
-
         @returns sents_var: tensor of (max_sentence_length, batch_size, max_word_length)
         """
-        ### YOUR CODE HERE for part 1g
-        ### TODO:
-        ###     Connect `words2charindices()` and `pad_sents_char()` which you've defined in
-        ###     previous parts
+        #Connect `words2charindices()` and `pad_sents_char()` which you've defined in previous parts
         char_ids = self.words2charindices(sents)
         sents_t = pad_sents_char(char_ids, self.char2id['<pad>'])
         sents_var = torch.tensor(sents_t, dtype=torch.long, device=device)
         return sents_var.permute(1, 0, 2)
-        ### END YOUR CODE
 
     def to_input_tensor(self, sents: List[List[str]], device: torch.device) -> torch.Tensor:
         """ Convert list of sentences (words) into tensor with necessary padding for
         shorter sentences.
-
         @param sents (List[List[str]]): list of sentences (words)
         @param device: device on which to load the tesnor, i.e. CPU or GPU
-
         @returns sents_var: tensor of (max_sentence_length, batch_size)
         """
         word_ids = self.words2indices(sents)
@@ -178,14 +161,14 @@ class VocabEntry(object):
         return torch.t(sents_var)
 
     @staticmethod
-    def from_corpus(corpus, size, freq_cutoff=2):
+    def from_corpus(corpus, size, char_list=None, freq_cutoff=2):
         """ Given a corpus construct a Vocab Entry.
         @param corpus (list[str]): corpus of text produced by read_corpus function
         @param size (int): # of words in vocabulary
         @param freq_cutoff (int): if word occurs n < freq_cutoff times, drop the word
         @returns vocab_entry (VocabEntry): VocabEntry instance produced from provided corpus
         """
-        vocab_entry = VocabEntry()
+        vocab_entry = VocabEntry(char_list=char_list)
         word_freq = Counter(chain(*corpus))
         valid_words = [w for w, v in word_freq.items() if v >= freq_cutoff]
         print('number of word types: {}, number of word types w/ frequency >= {}: {}'
@@ -208,7 +191,7 @@ class Vocab(object):
         self.tgt = tgt_vocab
 
     @staticmethod
-    def build(src_sents, tgt_sents, vocab_size, freq_cutoff) -> 'Vocab':
+    def build(src_sents, tgt_sents, vocab_size, freq_cutoff, src_char_list=None, tgt_char_list=None) -> 'Vocab':
         """ Build Vocabulary.
         @param src_sents (list[str]): Source sentences provided by read_corpus() function
         @param tgt_sents (list[str]): Target sentences provided by read_corpus() function
@@ -218,50 +201,15 @@ class Vocab(object):
         assert len(src_sents) == len(tgt_sents)
 
         print('initialize source vocabulary ..')
-        src = VocabEntry.from_corpus(src_sents, vocab_size, freq_cutoff)
+        src = VocabEntry.from_corpus(corpus=src_sents, size=vocab_size, char_list=src_char_list, freq_cutoff=freq_cutoff)
 
         print('initialize target vocabulary ..')
-        tgt = VocabEntry.from_corpus(tgt_sents, vocab_size, freq_cutoff)
+        tgt = VocabEntry.from_corpus(corpus=tgt_sents, size=vocab_size, char_list=tgt_char_list, freq_cutoff=freq_cutoff)
 
         return Vocab(src, tgt)
-
-    def save(self, file_path):
-        """ Save Vocab to file as JSON dump.
-        @param file_path (str): file path to vocab file
-        """
-        json.dump(dict(src_word2id=self.src.word2id, tgt_word2id=self.tgt.word2id), open(file_path, 'w'), indent=2)
-
-    @staticmethod
-    def load(file_path):
-        """ Load vocabulary from JSON dump.
-        @param file_path (str): file path to vocab file
-        @returns Vocab object loaded from JSON dump
-        """
-        entry = json.load(open(file_path, 'r'))
-        src_word2id = entry['src_word2id']
-        tgt_word2id = entry['tgt_word2id']
-
-        return Vocab(VocabEntry(src_word2id), VocabEntry(tgt_word2id))
 
     def __repr__(self):
         """ Representation of Vocab to be used
         when printing the object.
         """
         return 'Vocab(source %d words, target %d words)' % (len(self.src), len(self.tgt))
-
-
-
-if __name__ == '__main__':
-    args = docopt(__doc__)
-
-    print('read in source sentences: %s' % args['--train-src'])
-    print('read in target sentences: %s' % args['--train-tgt'])
-
-    src_sents = read_corpus(args['--train-src'], source='src')
-    tgt_sents = read_corpus(args['--train-tgt'], source='tgt')
-
-    vocab = Vocab.build(src_sents, tgt_sents, int(args['--size']), int(args['--freq-cutoff']))
-    print('generated vocabulary, source %d words, target %d words' % (len(vocab.src), len(vocab.tgt)))
-
-    vocab.save(args['VOCAB_FILE'])
-    print('vocabulary saved to %s' % args['VOCAB_FILE'])
