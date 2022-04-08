@@ -337,7 +337,7 @@ class NMT(nn.Module):
 
             decoderStatesForUNKsHere = []
             for prev_hyp_id, hyp_word_id, cand_new_hyp_score in zip(prev_hyp_ids, hyp_word_ids, top_cand_hyp_scores):
-                prev_hyp_id = prev_hyp_id.item()
+                prev_hyp_id = int(prev_hyp_id.item())
                 hyp_word_id = hyp_word_id.item()
                 cand_new_hyp_score = cand_new_hyp_score.item()
 
