@@ -44,6 +44,7 @@ class NMT(nn.Module):
         self.model_embeddings_target = ModelEmbeddings(embed_size, vocab.tgt)
 
         self.hidden_size = hidden_size
+        self.embed_size = embed_size
         self.dropout_rate = dropout_rate
         self.vocab = vocab
 
@@ -400,15 +401,14 @@ class NMT(nn.Module):
         return model
 
     def save(self, path: str):
-        """ Save the odel to a file.
+        """ Save the model to a file.
         @param path (str): path to the model
         """
         print('save model parameters to [%s]' % path, file=sys.stderr)
 
         params = {
-            'args': dict(embed_size=self.model_embeddings_source.embed_size, hidden_size=self.hidden_size, dropout_rate=self.dropout_rate),
+            'args': dict(embed_size=self.embed_size, hidden_size=self.hidden_size, dropout_rate=self.dropout_rate),
             'vocab': self.vocab,
             'state_dict': self.state_dict()
         }
-
         torch.save(params, path)
