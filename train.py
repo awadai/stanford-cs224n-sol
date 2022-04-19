@@ -12,7 +12,6 @@ Options:
     --embed-size=<int>                      embedding size [default: 256]
     --hidden-size=<int>                     hidden size [default: 256]
     --clip-grad=<float>                     gradient clipping [default: 5.0]
-    --log-every=<int>                       log every [default: 10]
     --max-epoch=<int>                       max epoch [default: 30]
     --input-feed                            use input feeding
     --patience=<int>                        wait for how many iterations to decay learning rate [default: 5]
@@ -22,18 +21,13 @@ Options:
     --sample-size=<int>                     sample size [default: 5]
     --lr=<float>                            learning rate [default: 0.001]
     --uniform-init=<float>                  uniformly initialize all parameters [default: 0.1]
-    --save-to=<file>                        model save path [default: model.bin]
-    --valid-niter=<int>                     perform validation after how many iterations [default: 2000]
     --dropout=<float>                       dropout [default: 0.3]
     --max-decoding-time-step=<int>          maximum number of decoding time steps [default: 70]
     --no-char-decoder                       do not use the character decoder
 """
 import math
 import sys
-import pickle
-import time
 import numpy as np
-from tqdm import tqdm
 import torch
 import torch.nn.utils
 from nltk.translate.bleu_score import corpus_bleu, sentence_bleu, SmoothingFunction
@@ -49,7 +43,7 @@ def compute_corpus_level_bleu_score(references: List[List[str]], hypotheses: Lis
     @param hypotheses (List[Hypothesis]): a list of hypotheses, one for each reference
     @returns bleu_score: corpus-level BLEU score
     """
-    if references[0][0] in ['<s>', '<SOS>':
+    if references[0][0] in ('<s>', '<SOS>'):
         references = [ref[1:-1] for ref in references]
     bleu_score = corpus_bleu([[ref] for ref in references], [hyp.value for hyp in hypotheses])
     return bleu_score
@@ -57,31 +51,26 @@ def compute_corpus_level_bleu_score(references: List[List[str]], hypotheses: Lis
 
 @torch.no_grad()
 def evaluate_ppl(model, dev_data, batch_size=32):
-    """ Evaluate perplexity on dev sentences
+    """ Evaluate on dev sentences
     @param model (NMT): NMT Model
     @param dev_data (list of (src_sent, tgt_sent)): list of tuples containing source and target sentence
     @param batch_size (batch size)
-    @returns ppl (perplixty on dev sentences)
+    @returns validation loss
     """
     was_training = model.training
     model.eval()
 
-    cum_loss = 0.
-    cum_tgt_words = 0.
+    cum_loss = 0
 
     for src_sents, tgt_sents in batch_iter(dev_data, batch_size):
         loss = -model(src_sents, tgt_sents).sum()
 
         cum_loss += loss.item()
-        tgt_word_num_to_predict = sum(len(s[1:]) for s in tgt_sents)  # omitting leading `<s>`
-        cum_tgt_words += tgt_word_num_to_predict
-
-        ppl = np.exp(cum_loss / cum_tgt_words)
 
     if was_training:
         model.train()
 
-    return ppl
+    return cum_loss / len(dev_data)
 
 
 def train(args: Dict):
@@ -100,9 +89,6 @@ def train(args: Dict):
     train_batch_size = int(args['--batch-size'])
 
     clip_grad = float(args['--clip-grad'])
-    valid_niter = int(args['--valid-niter'])
-    log_every = int(args['--log-every'])
-    model_save_path = args['--save-to']
 
     vocab = args['--vocab']
 
@@ -122,118 +108,44 @@ def train(args: Dict):
     vocab_mask[vocab.tgt['<pad>']] = 0
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    print('use device: %s' % device)
 
     model = model.to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=float(args['--lr']))
 
-    num_trial = 0
-    train_iter = patience = cum_loss = report_loss = cum_tgt_words = report_tgt_words = 0
-    cum_examples = report_examples = epoch = valid_num = 0
-    hist_valid_scores = []
-    train_time = begin_time = time.time()
+    hist_train_losses = []
+    hist_val_losses = []
+    
     print('begin Maximum Likelihood training')
-
-    while True:
-        epoch += 1
-
+    for epoch in range(args['--max-epoch']):
+        
+        cum_train_loss = 0
+        best_val_bleu = 0
+        
         for src_sents, tgt_sents in batch_iter(train_data, batch_size=train_batch_size, shuffle=True):
-            train_iter += 1
 
             optimizer.zero_grad()
 
-            batch_size = len(src_sents)
-
-            example_losses = - model(src_sents, tgt_sents) # (batch_size,)
+            example_losses = - model(src_sents, tgt_sents)
             batch_loss = example_losses.sum()
-            loss = batch_loss / batch_size
+            loss = batch_loss / len(src_sents)
 
             loss.backward()
-
-            # clip gradient
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), clip_grad)
-
             optimizer.step()
-
-            batch_losses_val = batch_loss.item()
-            report_loss += batch_losses_val
-            cum_loss += batch_losses_val
-
-            tgt_words_num_to_predict = sum(len(s[1:]) for s in tgt_sents)  # omitting leading `<s>`
-            report_tgt_words += tgt_words_num_to_predict
-            cum_tgt_words += tgt_words_num_to_predict
-            report_examples += batch_size
-            cum_examples += batch_size
-
-            if train_iter % log_every == 0:
-                print(f'epoch {epoch}, iter {train_iter}, avg. loss {report_loss / report_examples:.2f},' \
-                      f'cum. examples {cum_examples}, speed {report_tgt_words / (time.time() - train_time):.2f} words/sec, time elapsed {time.time() - begin_time:.2f} sec')
-
-                train_time = time.time()
-                report_loss = report_tgt_words = report_examples = 0.
-
-            # perform validation
-            if train_iter % valid_niter == 0:
-                print(f'epoch {epoch}, iter {train_iter}, cum. loss {cum_loss / cum_examples:.2f}, cum. examples {cum_examples}')
-
-                cum_loss = cum_examples = cum_tgt_words = 0.
-                valid_num += 1
-
-                print('begin validation ...')
-
-                # compute dev ppl and bleu
-                dev_ppl = evaluate_ppl(model, dev_data, batch_size=128)   # dev batch size can be a bit larger
-                valid_metric = - dev_ppl
-
-                print(f'validation: iter {train_iter}, dev. ppl {dev_ppl}')
-
-                is_better = len(hist_valid_scores) == 0 or valid_metric > max(hist_valid_scores)
-                hist_valid_scores.append(valid_metric)
-
-                if is_better:
-                    patience = 0
-                    print('save currently the best model to [%s]' % model_save_path)
-                    model.save(model_save_path)
-                    # also save the optimizers' state
-                    torch.save(optimizer.state_dict(), model_save_path + '.optim')
-                
-                elif patience < int(args['--patience']):
-                    patience += 1
-                    print('hit patience %d' % patience)
-
-                    if patience == int(args['--patience']):
-                        num_trial += 1
-                        print('hit #%d trial' % num_trial)
-                        if num_trial == int(args['--max-num-trial']):
-                            print('early stop!')
-                            return
-
-                        # decay lr, and restore from previously best checkpoint
-                        lr = optimizer.param_groups[0]['lr'] * float(args['--lr-decay'])
-                        print('load previously best model and decay learning rate to %f' % lr)
-
-                        # load model
-                        params = torch.load(model_save_path, map_location=lambda storage, loc: storage)
-                        model.load_state_dict(params['state_dict'])
-                        model = model.to(device)
-
-                        print('restore parameters of the optimizers')
-                        optimizer.load_state_dict(torch.load(model_save_path + '.optim'))
-
-                        # set new lr
-                        for param_group in optimizer.param_groups:
-                            param_group['lr'] = lr
-
-                        # reset patience
-                        patience = 0
-
-            if epoch == int(args['--max-epoch']):
-                print('reached maximum number of epochs!')
-                return
+            
+            cum_train_loss += batch_loss
+        
+        hist_train_losses.append(cum_train_loss/len(train_data))
+        
+        # perform validation
+        val_loss = evaluate(model, dev_data, batch_size=128)
+        hist_val_losses.append(val_loss)
+    
+    return hist_train_losses, hits_val_losses
 
 
-def decode(args: Dict[str, str]):
+def decode(model: NMT, args: Dict[str, str]):
     """ Performs decoding on a test set, and save the best-scoring decoding results.
     If the target gold-standard sentences are given, the function also computes
     corpus-level BLEU score.
@@ -245,10 +157,6 @@ def decode(args: Dict[str, str]):
     if args['--test-tgt']:
         print("load test target sentences from [{}]".format(args['--test-tgt']))
         test_data_tgt = read_corpus(args['--test-tgt'], source='tgt')
-
-    print("load model from {}".format(args['--save-to']))
-    model = NMT.load(args['--save-to'], no_char_decoder=args['--no-char-decoder'])
-    model = model.to(torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
 
     hypotheses = beam_search(model, test_data_src,
                              beam_size=int(args['--beam-size']),
@@ -274,7 +182,7 @@ def beam_search(model: NMT, test_data_src: List[List[str]], beam_size: int, max_
     @param max_decoding_time_step (int): maximum sentence length that Beam search can produce
     @returns hypotheses (List[List[Hypothesis]]): List of Hypothesis translations for every source sentence.
     """
-    was_training = model.training
+    was_training = model.training()
     model.eval()
 
     hypotheses = []
@@ -283,6 +191,7 @@ def beam_search(model: NMT, test_data_src: List[List[str]], beam_size: int, max_
             example_hyps = model.beam_search(src_sent, beam_size=beam_size, max_decoding_time_step=max_decoding_time_step)
             hypotheses.append(example_hyps)
 
-    if was_training: model.train(was_training)
+    if was_training:
+        model.train()
 
     return hypotheses
