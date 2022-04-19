@@ -36,10 +36,24 @@ import numpy as np
 from tqdm import tqdm
 import torch
 import torch.nn.utils
+from nltk.translate.bleu_score import corpus_bleu, sentence_bleu, SmoothingFunction
 from typing import List, Tuple, Dict, Set, Union
 
 from nmt_model import Hypothesis, NMT
 from utils import read_corpus, batch_iter
+
+
+def compute_corpus_level_bleu_score(references: List[List[str]], hypotheses: List[Hypothesis]) -> float:
+    """ Given decoding results and reference sentences, compute corpus-level BLEU score.
+    @param references (List[List[str]]): a list of gold-standard reference target sentences
+    @param hypotheses (List[Hypothesis]): a list of hypotheses, one for each reference
+    @returns bleu_score: corpus-level BLEU score
+    """
+    if references[0][0] in ['<s>', '<SOS>':
+        references = [ref[1:-1] for ref in references]
+    bleu_score = corpus_bleu([[ref] for ref in references], [hyp.value for hyp in hypotheses])
+    return bleu_score
+
 
 @torch.no_grad()
 def evaluate_ppl(model, dev_data, batch_size=32):
@@ -217,3 +231,58 @@ def train(args: Dict):
             if epoch == int(args['--max-epoch']):
                 print('reached maximum number of epochs!')
                 return
+
+
+def decode(args: Dict[str, str]):
+    """ Performs decoding on a test set, and save the best-scoring decoding results.
+    If the target gold-standard sentences are given, the function also computes
+    corpus-level BLEU score.
+    @param args (Dict): args from cmd line
+    """
+
+    print("load test source sentences from [{}]".format(args['--test-src']))
+    test_data_src = read_corpus(args['--test-src'], source='src')
+    if args['--test-tgt']:
+        print("load test target sentences from [{}]".format(args['--test-tgt']))
+        test_data_tgt = read_corpus(args['--test-tgt'], source='tgt')
+
+    print("load model from {}".format(args['--save-to']))
+    model = NMT.load(args['--save-to'], no_char_decoder=args['--no-char-decoder'])
+    model = model.to(torch.device('cuda:0' if torch.cuda.is_available() else 'cpu'))
+
+    hypotheses = beam_search(model, test_data_src,
+                             beam_size=int(args['--beam-size']),
+                             max_decoding_time_step=int(args['--max-decoding-time-step']))
+
+    if args['--test-tgt']:
+        top_hypotheses = [hyps[0] for hyps in hypotheses]
+        bleu_score = compute_corpus_level_bleu_score(test_data_tgt, top_hypotheses)
+        print('Corpus BLEU: {}'.format(bleu_score * 100))
+
+    with open('output.txt', 'w') as f:
+        for src_sent, hyps in zip(test_data_src, hypotheses):
+            top_hyp = hyps[0]
+            hyp_sent = ' '.join(top_hyp.value)
+            f.write(hyp_sent + '\n')
+
+            
+def beam_search(model: NMT, test_data_src: List[List[str]], beam_size: int, max_decoding_time_step: int) -> List[List[Hypothesis]]:
+    """ Run beam search to construct hypotheses for a list of src-language sentences.
+    @param model (NMT): NMT Model
+    @param test_data_src (List[List[str]]): List of sentences (words) in source language, from test set.
+    @param beam_size (int): beam_size (# of hypotheses to hold for a translation at every step)
+    @param max_decoding_time_step (int): maximum sentence length that Beam search can produce
+    @returns hypotheses (List[List[Hypothesis]]): List of Hypothesis translations for every source sentence.
+    """
+    was_training = model.training
+    model.eval()
+
+    hypotheses = []
+    with torch.no_grad():
+        for src_sent in tqdm(test_data_src, desc='Decoding'):
+            example_hyps = model.beam_search(src_sent, beam_size=beam_size, max_decoding_time_step=max_decoding_time_step)
+            hypotheses.append(example_hyps)
+
+    if was_training: model.train(was_training)
+
+    return hypotheses
