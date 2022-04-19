@@ -138,6 +138,8 @@ def train_model(args: Dict):
         # perform validation
         val_loss = evaluate(model, dev_data, batch_size=128)
         hist_val_losses.append(val_loss)
+        print(f'********Epoch {epoch+1}********')
+        print(f'Train loss: {cum_train_loss/len(train_data):.2f};    Val loss {val_loss:.2f}\n')
     
     return model, hist_train_losses, hits_val_losses
 
