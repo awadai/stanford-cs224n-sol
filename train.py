@@ -113,7 +113,6 @@ def train_model(args: Dict):
     hist_train_losses = []
     hist_val_losses = []
     
-    print('begin Maximum Likelihood training')
     for epoch in range(args['--max-epoch']):
         
         cum_train_loss = 0
