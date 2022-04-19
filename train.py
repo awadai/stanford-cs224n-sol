@@ -48,7 +48,7 @@ def compute_corpus_level_bleu_score(references: List[List[str]], hypotheses: Lis
 
 
 @torch.no_grad()
-def evaluate_ppl(model, dev_data, batch_size=32):
+def evaluate(model, dev_data, batch_size=32):
     """ Evaluate on dev sentences
     @param model (NMT): NMT Model
     @param dev_data (list of (src_sent, tgt_sent)): list of tuples containing source and target sentence
@@ -71,7 +71,7 @@ def evaluate_ppl(model, dev_data, batch_size=32):
     return cum_loss / len(dev_data)
 
 
-def train(args: Dict):
+def train_model(args: Dict):
     """ Train the NMT Model.
     @param args (Dict): args from cmd line
     """
