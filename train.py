@@ -13,7 +13,6 @@ Options:
     --hidden-size=<int>                     hidden size [default: 256]
     --clip-grad=<float>                     gradient clipping [default: 5.0]
     --max-epoch=<int>                       max epoch [default: 30]
-    --input-feed                            use input feeding
     --lr-decay=<float>                      learning rate decay [default: 0.5]
     --beam-size=<int>                       beam size [default: 5]
     --sample-size=<int>                     sample size [default: 5]
@@ -140,7 +139,7 @@ def train_model(args: Dict):
         val_loss = evaluate(model, dev_data, batch_size=128)
         hist_val_losses.append(val_loss)
     
-    return hist_train_losses, hits_val_losses
+    return model, hist_train_losses, hits_val_losses
 
 
 def decode(model: NMT, args: Dict[str, str]):
