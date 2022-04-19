@@ -132,7 +132,9 @@ def train_model(args: Dict):
             
             cum_train_loss += batch_loss
         
-        hist_train_losses.append(cum_train_loss/len(train_data))
+        train_loss = cum_train_loss/len(train_data)
+        train_loss = train_loss.item()
+        hist_train_losses.append(train_loss)
         
         # perform validation
         val_loss = evaluate(model, dev_data, batch_size=128)
