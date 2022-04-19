@@ -182,7 +182,7 @@ def beam_search(model: NMT, test_data_src: List[List[str]], beam_size: int, max_
     @param max_decoding_time_step (int): maximum sentence length that Beam search can produce
     @returns hypotheses (List[List[Hypothesis]]): List of Hypothesis translations for every source sentence.
     """
-    was_training = model.training()
+    was_training = model.training
     model.eval()
 
     hypotheses = []
