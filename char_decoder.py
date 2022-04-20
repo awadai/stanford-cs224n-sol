@@ -113,7 +113,7 @@ class CharDecoder(nn.Module):
         chars = np.zeros((bch_size, max_length), dtype=np.int32)   # (b, w_len)
         chars[:, 0] = np.ones(bch_size) * self.target_vocab.start_of_word
 
-        inpts = torch.LongTensor(chars[:, 0], device=device)   # (b, )
+        inpts = torch.tensor(chars[:, 0], dtype=torch.long, device=device)   # (b, )
         states = initialStates
 
         for t in range(1, max_length):
